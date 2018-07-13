@@ -92,7 +92,7 @@ int NextWaypoint(double x, double y, double theta, const vector<double> &maps_x,
 
 // Transform from Cartesian x,y coordinates to Frenet s,d coordinates
 vector<double> getFrenet(double x, double y, double theta, const vector<double> &maps_x, const vector<double> &maps_y)
-				{
+										{
 	int next_wp = NextWaypoint(x,y, theta, maps_x,maps_y);
 
 	int prev_wp;
@@ -137,11 +137,11 @@ vector<double> getFrenet(double x, double y, double theta, const vector<double> 
 
 	return {frenet_s,frenet_d};
 
-				}
+										}
 
 // Transform from Frenet s,d coordinates to Cartesian x,y
 vector<double> getXY(double s, double d, const vector<double> &maps_s, const vector<double> &maps_x, const vector<double> &maps_y)
-				{
+										{
 	int prev_wp = -1;
 
 	while(s > maps_s[prev_wp+1] && (prev_wp < (int)(maps_s.size()-1) ))
@@ -165,7 +165,7 @@ vector<double> getXY(double s, double d, const vector<double> &maps_s, const vec
 
 	return {x,y};
 
-				}
+										}
 
 int main() {
 	uWS::Hub h;
@@ -353,6 +353,12 @@ int main() {
 					double x_add_on = 0;
 
 					for(int i=0; i<= 50-previous_path_x.size(); i++){
+						if(too_close){
+							ref_vel -= .224;
+						}else if(ref_vel<49.5){
+							ref_vel += .224;
+						}
+
 						double N = target_dist/(.02*ref_vel/2.24); // 2.24 is conversion factor from mph to meters/second
 						double x_point = x_add_on + target_x/N;
 						double y_point = s(x_point);
@@ -373,19 +379,19 @@ int main() {
 						next_y_vals.push_back(y_point);
 					}
 
-//					double dist_inc = 0.3;
-//					for(int i = 0; i < 50; i++)
-//					{
-//						double next_s = car_s + (i+1)*dist_inc;
-//						double next_d = 6;
-//						vector<double> xy = getXY(next_s, next_d, map_waypoints_s, map_waypoints_x, map_waypoints_y);
-//
-//						next_x_vals.push_back(xy.at(0));
-//						next_y_vals.push_back(xy.at(1));
-//
-//						//						next_x_vals.push_back(car_x+(dist_inc*i)*cos(deg2rad(car_yaw)));
-//						//						next_y_vals.push_back(car_y+(dist_inc*i)*sin(deg2rad(car_yaw)));
-//					}
+					//					double dist_inc = 0.3;
+					//					for(int i = 0; i < 50; i++)
+					//					{
+					//						double next_s = car_s + (i+1)*dist_inc;
+					//						double next_d = 6;
+					//						vector<double> xy = getXY(next_s, next_d, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+					//
+					//						next_x_vals.push_back(xy.at(0));
+					//						next_y_vals.push_back(xy.at(1));
+					//
+					//						//						next_x_vals.push_back(car_x+(dist_inc*i)*cos(deg2rad(car_yaw)));
+					//						//						next_y_vals.push_back(car_y+(dist_inc*i)*sin(deg2rad(car_yaw)));
+					//					}
 
 					// TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
 					json msgJson;
