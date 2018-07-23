@@ -411,7 +411,7 @@ int main() {
 					double x_add_on = 0;
 
 					for(int i=0; i<= 50-previous_path_x.size(); i++){
-						if(too_close){
+						if(too_close && ref_vel>target_vel){
 							ref_vel -= .224;
 						}else if(ref_vel<target_vel){
 							ref_vel += .224;
