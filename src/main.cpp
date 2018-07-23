@@ -20,8 +20,8 @@ constexpr double pi() { return M_PI; }
 double deg2rad(double x) { return x * pi() / 180; }
 double rad2deg(double x) { return x * 180 / pi(); }
 
-int lane = 1;
-double ref_vel = 0;
+//int lane = 1;
+//double ref_vel = 0;
 
 // Checks if the SocketIO event has JSON data.
 // If there is data the JSON object in string format will be returned,
@@ -92,7 +92,7 @@ int NextWaypoint(double x, double y, double theta, const vector<double> &maps_x,
 
 // Transform from Cartesian x,y coordinates to Frenet s,d coordinates
 vector<double> getFrenet(double x, double y, double theta, const vector<double> &maps_x, const vector<double> &maps_y)
-										{
+																		{
 	int next_wp = NextWaypoint(x,y, theta, maps_x,maps_y);
 
 	int prev_wp;
@@ -137,11 +137,11 @@ vector<double> getFrenet(double x, double y, double theta, const vector<double> 
 
 	return {frenet_s,frenet_d};
 
-										}
+																		}
 
 // Transform from Frenet s,d coordinates to Cartesian x,y
 vector<double> getXY(double s, double d, const vector<double> &maps_s, const vector<double> &maps_x, const vector<double> &maps_y)
-										{
+																		{
 	int prev_wp = -1;
 
 	while(s > maps_s[prev_wp+1] && (prev_wp < (int)(maps_s.size()-1) ))
@@ -164,8 +164,11 @@ vector<double> getXY(double s, double d, const vector<double> &maps_s, const vec
 	double y = seg_y + d*sin(perp_heading);
 
 	return {x,y};
+																		}
 
-										}
+const double speed_limit = 50; //mph
+const double SAFE_DIST = 30;
+const double MPH_to_MTRPS = 2.24;
 
 int main() {
 	uWS::Hub h;
@@ -204,7 +207,12 @@ int main() {
 		map_waypoints_dy.push_back(d_y);
 	}
 
-	h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
+	int lane = 1;
+	int lead_vehicle_index = -1;
+	double ref_vel = 0;
+	double target_vel = speed_limit - 1;
+
+	h.onMessage([&lane, &ref_vel, &lead_vehicle_index, &target_vel, &map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
 			uWS::OpCode opCode) {
 		// "42" at the start of the message means there's a websocket message event.
 		// The 4 signifies a websocket message
@@ -250,7 +258,8 @@ int main() {
 						car_s = end_path_s;
 					}
 
-					bool too_close = false;
+					lead_vehicle_index = -1;
+					bool too_close = 0;
 
 					for(int i=0; i<sensor_fusion.size(); i++){
 						float d = sensor_fusion[i][6];
@@ -263,18 +272,67 @@ int main() {
 
 							check_car_s += ((double)prev_size * 0.02 * check_speed);
 
-							if((check_car_s>car_s) && (check_car_s-car_s)<30){
-								too_close = true;
+							if((check_car_s>car_s) && (check_car_s-car_s)<SAFE_DIST){
+								lead_vehicle_index = i;
+								too_close = 1;
+								break;
 							}
 						}
 					}
 
-					if(too_close){
-						ref_vel -= .224;
-					}else if(ref_vel<49.5){
-						ref_vel += .224;
+					if (lead_vehicle_index != -1){
+						double lead_s = sensor_fusion[lead_vehicle_index][5];
+						double lead_vx = sensor_fusion[lead_vehicle_index][3];
+						double lead_vy = sensor_fusion[lead_vehicle_index][4];
+						double lead_speed = sqrt((lead_vx*lead_vx)+(lead_vy*lead_vy));
+						target_vel = lead_speed*MPH_to_MTRPS-1;
+						cout << "Found vehicle ahead with speed: " << lead_speed*MPH_to_MTRPS << endl;
+					}else{
+						target_vel = speed_limit-1;
 					}
 
+					//If the target_vel is less than speed_limit then check other lanes if they're faster than the current lane.
+					if (target_vel<speed_limit-1){
+						vector<bool> lane_available = {true,true,true};
+						vector<double> lane_speed = {speed_limit-1, speed_limit-1, speed_limit-1};
+
+						lane_speed[lane] = target_vel;
+						for (int cur_lane = 0; cur_lane<=2;cur_lane++){
+							for (int i=0; i<sensor_fusion.size();i++){
+								float d = sensor_fusion[i][6];
+								// If a vehicle is in the cur_lane
+								if ((d<(2+4*cur_lane+2))&&(d>(2+4*cur_lane-2))){
+									double check_car_s = sensor_fusion[i][5];
+									// If the car is close to us, mark the lane as unavailable
+									if (abs(check_car_s - car_s)<SAFE_DIST){
+										lane_available[cur_lane] = false;
+									}
+									//If the car is within 60 meters ahead then change the lane speed to that car's speed.
+									else if ((check_car_s - car_s)<60 && check_car_s > car_s){
+										double lead_vx = sensor_fusion[i][3];
+										double lead_vy = sensor_fusion[i][4];
+										double lead_speed = sqrt(lead_vx*lead_vx+lead_vy*lead_vy);
+										lane_speed[cur_lane] = lead_speed*MPH_to_MTRPS;
+									}
+								}
+							}
+						}
+
+						for (int cur_lane=0;cur_lane<lane_available.size();cur_lane++){
+							cout << "Lane " << cur_lane << " available " << lane_available[cur_lane] << " speed: " << lane_speed[cur_lane] <<endl;
+						}
+
+						cout<<endl;
+
+						for (int cur_lane=0;cur_lane<lane_available.size();cur_lane++){
+							//Make a lane a change if an adjacent lane is available and it's speed is faster than current lane.
+							if (lane_available[cur_lane]==true && abs(lane-cur_lane)==1 && lane_speed[cur_lane]>lane_speed[lane]){
+								cout << "Found faster adjacent lane: " << cur_lane << endl;
+								lane=cur_lane;
+								break;
+							}
+						}
+					}
 
 					//Create a list of widely sparsed (x,y) waypoints, evenly spaced at 30m
 					//Later we will interpolate these waypoints with a spline and fill it in with more points that control speed.
@@ -355,11 +413,11 @@ int main() {
 					for(int i=0; i<= 50-previous_path_x.size(); i++){
 						if(too_close){
 							ref_vel -= .224;
-						}else if(ref_vel<49.5){
+						}else if(ref_vel<target_vel){
 							ref_vel += .224;
 						}
 
-						double N = target_dist/(.02*ref_vel/2.24); // 2.24 is conversion factor from mph to meters/second
+						double N = target_dist/(.02*ref_vel/MPH_to_MTRPS); // 2.24 is conversion factor from mph to meters/second
 						double x_point = x_add_on + target_x/N;
 						double y_point = s(x_point);
 
@@ -393,7 +451,6 @@ int main() {
 					//						//						next_y_vals.push_back(car_y+(dist_inc*i)*sin(deg2rad(car_yaw)));
 					//					}
 
-					// TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
 					json msgJson;
 
 					msgJson["next_x"] = next_x_vals;
